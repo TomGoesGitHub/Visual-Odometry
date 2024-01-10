@@ -66,21 +66,23 @@ class StereoCamera:
         '''
         b, c_u, c_v, f_u, f_v = self.baseline, *self.center_pos, *self.focal_len # alias
         
-        T_xyz_to_img_left = np.array([f_u, 0, c_u, 0],
-                                     [0, f_v, c_v, 0],
-                                     [0,   0,   1, 0])
+        T_xyz_to_img_left = np.array([[f_u, 0, c_u, 0],
+                                      [0, f_v, c_v, 0],
+                                      [0,   0,   1, 0]])
         
-        T_xyz_to_img_right = np.array([f_u, 0, c_u, -f_u*b],
-                                      [0, f_v, c_v,      0],
-                                      [0,   0,   1,      0])
+        T_xyz_to_img_right = np.array([[f_u, 0, c_u, -f_u*b],
+                                       [0, f_v, c_v,      0],
+                                       [0,   0,   1,      0]])
 
-        xyz_homogenious = np.stack([xyz, [1]], axis=0)
-        uv_homogenious_left = T_xyz_to_img_left @ xyz_homogenious
-        uv_homogenious_right = T_xyz_to_img_right @ xyz_homogenious
+        xyz_homogenious = np.concatenate([xyz, np.ones([len(xyz),1])], axis=1).T
+        z = xyz[:, 2]
+        uv_homogenious_left = T_xyz_to_img_left @ xyz_homogenious/z
+        uv_homogenious_right = T_xyz_to_img_right @ xyz_homogenious/z
         
-        uv_left = uv_homogenious_left[:-1]
-        uv_right = uv_homogenious_right[:-1]
-        return uv_left, uv_right
+        uv_left = uv_homogenious_left[:-1].T
+        uv_right = uv_homogenious_right[:-1].T
+        
+        return uv_left.astype(np.int32), uv_right.astype(np.int32)
 
 class FeatureBasedVisualOdometryCallback:
     '''Abstract Callback Class for Feature Based Visual Odometry.
@@ -332,12 +334,15 @@ class SimulationCallback(FeatureBasedVisualOdometryCallback):
         if self.simulation.trigger_visualization:
             self.simulation.axes['D'].clear()
             self.simulation.axes['D'].set_title('Stereo Matching')
-            draw_matches_custom(ax=self.simulation.axes['D'],
-                                img1=locals['img_l'],
-                                kp1=locals['kp_l'],
-                                img2=locals['img_r'],
-                                kp2=locals['kp_r'],
-                                matches=locals['matches'])
+             
+            img_matches = draw_matches_custom(
+                img1=locals['img_l'],
+                kp1=locals['kp_l'],
+                img2=locals['img_r'],
+                kp2=locals['kp_r'],
+                matches=locals['matches']
+            )
+            self.simulation.axes['D'].imshow(img_matches)
 
     def after_triangulation(self, locals):
         if self.simulation.trigger_visualization:
@@ -348,6 +353,29 @@ class SimulationCallback(FeatureBasedVisualOdometryCallback):
                             xyz_1=locals['xyz_2'],)
             self.simulation.axes['E'].set_xlim(-20, 20)
             self.simulation.axes['E'].set_ylim(0, 50)
+    
+    def after_track_matching(self, locals):
+        img_l1, img_r1 = locals['img_pair_1']
+        img_l2, img_r2 = locals['img_pair_2']
+        xyz_1 = locals['xyz_1']
+        xyz_2 = locals['xyz_2']
+        
+        uv_l1, uv_r1 = self.simulation.odom.camera_model.forward(xyz_1)
+        uv_l2, uv_r2 = self.simulation.odom.camera_model.forward(xyz_2)
+        
+        blended_l = cv2.addWeighted(img_l1, 0.5, img_l2, 0.5, 0.0)
+        #blended_r = cv2.addWeighted(img_r1, 0.5, img_r2, 0.5, 0.0)
+        
+        for pt1, pt2 in zip(uv_l1, uv_l2):
+            cv2.line(blended_l, pt1, pt2, color=(0,0,255), thickness=1)
+        # for pt1, pt2 in zip(uv_r1, uv_r2):
+        #     cv2.line(blended_r, pt1, pt2, color=(0,0,255), thickness=1)
+        # stacked = np.concatenate([blended_l, blended_r], axis=1)
+
+        ax = self.simulation.axes['B']
+        ax.clear(), ax.set_title('Optical Flow (Left Image only)')
+        ax.imshow(blended_l)
+        
 
 class Simulation():
     def __init__(self, dir, sequence, visual_odometry, T_world_to_cam_initial=np.eye(4)):
@@ -369,7 +397,7 @@ class Simulation():
     
         # visualization
         self.freq = 1
-        self.fig, self.axes = plt.subplot_mosaic(mosaic='AADD\nCCEE\nCC..',
+        self.fig, self.axes = plt.subplot_mosaic(mosaic='AADD\nCCBB\nCCEE',
                                                  figsize=(20,10),)
 
     @property

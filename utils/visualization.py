@@ -20,7 +20,7 @@ def draw_coordinate_frame_2d(ax, R,t, color='black', alpha=1):
     pos = ax.scatter(x_gt, z_gt, c=color)
     return quiv, pos
 
-def draw_matches_custom(ax, img1, kp1, img2, kp2, matches):
+def draw_matches_custom(img1, kp1, img2, kp2, matches):
     blended = cv2.addWeighted(img1, 0.5, img2, 0.5, 0.0)
     cv2.drawKeypoints(blended, kp1, blended, color=(0,255,0))
     cv2.drawKeypoints(blended, kp2, blended, color=(255,0,0))
@@ -28,7 +28,7 @@ def draw_matches_custom(ax, img1, kp1, img2, kp2, matches):
         pt1 = tuple(int(x) for x in kp1[match.queryIdx].pt)
         pt2 = tuple(int(x) for x in kp2[match.trainIdx].pt)
         blended = cv2.line(blended, pt1, pt2, color=(0,0,255), thickness=1)
-    return ax.imshow(blended)
+    return blended # return ax.imshow(blended)
 
 def draw_matches_3d(ax, xyz_0, xyz_1):
     ax.scatter(xyz_0[:, 0], xyz_0[:, -1], color='blue', s=1)
