@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from utils.features import filter_horizontal_matches, filter_matches_by_distance_ratio, filter_best_matches
-from utils.matrix import homogenious_matrix, normalize_rotation_matrix
+from utils.spatial import homogenious_matrix, normalize_rotation_matrix, kabsch_umeyama
 from utils.visualization import draw_coordinate_frame_2d, draw_matches_custom, draw_matches_3d
 
 
@@ -39,6 +39,17 @@ class StereoCamera:
         self.focal_len = focal_len # in pixels
         self.center_pos = center_pos # in pixels, in pixel coordinates
 
+    def intrincsic_matrix(self, which='left'):
+        assert which in ['left', 'right']
+
+        c_u, c_v, f_u, f_v = *self.center_pos, *self.focal_len 
+        b = self.baseline if (which == 'right') else 0
+
+        return np.array([[f_u, 0, c_u, -f_u*b],
+                         [0, f_v, c_v,      0],
+                         [0,   0,   1,      0]])
+        
+    
     def triangulate(self, uv_left, uv_right):
         '''
         Inverse camera model: Recover the depth from the stereo vision pixels.    
@@ -110,13 +121,13 @@ class FeatureBasedVisualOdemetry:
     def fit_spatial_transformation(self, xyz_1, xyz_2, n_ransac=1000):
         '''
         Estimating the Transformation between the Frames A and B based on 3d samples from frame A
-        and B with RANSAC (random sample and consensus) and Weighted Point Cloud Alignment.
+        and B with RANSAC (random sample and consensus) and Point Cloud Alignment.
 
         Sources:
         - RANSAC: Fischler, M. and Bolles, R. (1981). Random sample and consensus: A paradigm for
                   model fitting with applications to image analysis and automated cartography. Comm.
                   of the ACM, 24(6):381-395. (ref. pages 12 and 127)
-        - WPCA  : S Umeyama, “Least-Squares Estimation of Transformation Parameters Between Two 
+        - PC-Al.: S Umeyama, “Least-Squares Estimation of Transformation Parameters Between Two 
                   Point Patterns”, IEEE Transactions on Pattern Analysis and Machine Intelligence, 
                   13(4), 1991
         '''
@@ -128,27 +139,32 @@ class FeatureBasedVisualOdemetry:
         best_n_inliers, R, t = -1, np.eye(3), np.ones(3) # to be updated
         for _ in range(n_ransac):
             # ransac random sampling
-            n_random_sampels = 4
+            n_random_sampels = 10
             idx = np.arange(n_datapoints)
             train_idx = np.random.choice(idx, size=n_random_sampels, replace=False)
             xyz_train_1, xyz_train_2 = xyz_1[train_idx], xyz_2[train_idx] 
 
             # point cloud alignment
-            centroid_1 = np.mean(xyz_train_1, axis=0)
-            centroid_2 = np.mean(xyz_train_2, axis=0)
-            delta_1 = (xyz_train_1 - centroid_1)
-            delta_2 = (xyz_train_2 - centroid_2)
-            W = np.einsum('ij,ik->jk', delta_1, delta_2) # sum over outer products
-            #H = np.sum([d1.reshape([-1,1])@d2.reshape([-1,1]).T for d1, d2 in zip(delta_1, delta_2)], axis=0)
-            U,_,VT = np.linalg.svd(W)
-            V = VT.T
-            R = V @ np.diag([1,1, np.linalg.det(U)*np.linalg.det(V)]) @ U.T
-            t = -R @ centroid_2  + centroid_1
+            R, tmp, t = kabsch_umeyama(
+                A=xyz_train_1,
+                B=xyz_train_2
+            )
+
+            # centroid_1 = np.mean(xyz_train_1, axis=0)
+            # centroid_2 = np.mean(xyz_train_2, axis=0)
+            # delta_1 = (xyz_train_1 - centroid_1)
+            # delta_2 = (xyz_train_2 - centroid_2)
+            # W = np.einsum('ij,ik->jk', delta_1, delta_2) # sum over outer products
+            # #H = np.sum([d1.reshape([-1,1])@d2.reshape([-1,1]).T for d1, d2 in zip(delta_1, delta_2)], axis=0)
+            # U,_,VT = np.linalg.svd(W)
+            # V = VT.T
+            # R = V @ np.diag([1,1, np.linalg.det(U)*np.linalg.det(V)]) @ U.T
+            # t = -R @ centroid_1 + centroid_2
             
             # ransac rejection
-            rejection_threshold = 1
+            rejection_threshold = 0.1
             c = xyz_2 - (t + np.matmul(R, (xyz_1)[:, :, np.newaxis]).squeeze(-1))
-            costs = np.einsum('ji,ik->i', c.T, c) # weigthed inner prod
+            costs = np.einsum('ji,ik->i', c.T, c) # batch inner prod
             is_inlier = (costs <= rejection_threshold)
             n_inliers = sum(is_inlier)
             
@@ -156,15 +172,15 @@ class FeatureBasedVisualOdemetry:
 
             # update
             if n_inliers > best_n_inliers:
-                det = np.linalg.det(U)*np.linalg.det(V)
+                #det = np.linalg.det(U)*np.linalg.det(V)
                 best_is_inlier = is_inlier
                 best_n_inliers = n_inliers
                 T_a_to_b = homogenious_matrix(R.T, -R.T@t)
-                # T_a_to_b = homogenious_matrix(R,t)
+                #T_a_to_b = homogenious_matrix(R,t)
         
         #plt.show() # todo: tmp
         # T_a_to_b = homogenious_matrix(R,t)
-        print('\n', best_n_inliers/len(is_inlier), np.linalg.det(R), det, '\n', np.round(T_a_to_b, decimals=2))
+        print('\n', best_n_inliers/len(is_inlier), np.linalg.det(R),'\n', tmp, '\n', np.round(T_a_to_b, decimals=2))
         return T_a_to_b, np.array(best_is_inlier)
     
     def match_stereo(self, img_l, img_r, kp_l, kp_r):
@@ -194,7 +210,7 @@ class FeatureBasedVisualOdemetry:
         matches = filter_best_matches(matches, keep_n_best=750)
         return matches
 
-    def run_stereo_vision_pipeline(self, img_left, img_right, callback=True):
+    def run_stereo_vision_pipeline(self, img_left, img_right):
         '''Run Stereo Vision Pipeline: i.e. keypoint-extraction, keypoint-description, matching,
         and 3d reconstruction.'''
         # keypoint detection
@@ -208,29 +224,41 @@ class FeatureBasedVisualOdemetry:
         _, des_right = self.descriptor.compute(img_right, kp_right)
 
         # pixel coordinates
-        uv_left = cv2.KeyPoint.convert(kp_left)
-        uv_right = cv2.KeyPoint.convert(kp_right)
+        uv_left = cv2.KeyPoint.convert(kp_left).astype(int)
+        uv_right = cv2.KeyPoint.convert(kp_right).astype(int)
 
         # triangulation
         xyz_cam = self.camera_model.triangulate(uv_left, uv_right)
         des = np.hstack([des_left, des_right])
         #self.callback.after_triangulation(locals())
         
-        return xyz_cam, des
+        return xyz_cam, des, uv_left
     
     def __call__(self, img_pair_1, img_pair_2):
         '''Given an image pair for each camera position, calculate the best fit of
         the spatial transformation between the 2 camera positions.'''
-        xyz_1, des1 = self.run_stereo_vision_pipeline(*img_pair_1)
-        xyz_2, des2 = self.run_stereo_vision_pipeline(*img_pair_2, callback=False)
+        xyz_1, des1, uv_left_1 = self.run_stereo_vision_pipeline(*img_pair_1)
+        xyz_2, des2, uv_left_2 = self.run_stereo_vision_pipeline(*img_pair_2)
         
         tracking_matches = self.match_track(des1, des2)
         idx_1 = np.array([match.queryIdx for match in tracking_matches])
         idx_2 = np.array([match.trainIdx for match in tracking_matches])
         xyz_1, xyz_2 = xyz_1[idx_1], xyz_2[idx_2]
+        uv_left_1, uv_left_2 = uv_left_1[idx_1], uv_left_2[idx_2]
         self.callback.after_track_matching(locals())
 
-        T_1_2, is_inlier= self.fit_spatial_transformation(xyz_1, xyz_2)
+        intrinsics = self.camera_model.intrincsic_matrix(which='left')
+        
+        _, rvec, tvec, is_inlier = cv2.solvePnPRansac(objectPoints=xyz_2,
+                                                      imagePoints=uv_left_1.astype(float), # note: cv2 requires float here, which is kinda weird...
+                                                      cameraMatrix=intrinsics[:, :3],
+                                                      distCoeffs=None)
+        rmat = cv2.Rodrigues(rvec)[0]    
+        T_1_2 = homogenious_matrix(R=rmat, t=tvec)
+        is_inlier = is_inlier.squeeze()
+        
+        #T_1_2, is_inlier= self.fit_spatial_transformation(xyz_1, xyz_2)
+
         xyz_1, xyz_2 = xyz_1[is_inlier], xyz_2[is_inlier]
         self.callback.after_triangulation(locals())
         return T_1_2
@@ -343,6 +371,9 @@ class SimulationCallback(FeatureBasedVisualOdometryCallback):
                 matches=locals['matches']
             )
             self.simulation.axes['D'].imshow(img_matches)
+            self.simulation.axes['D'].tick_params(which='both',
+                                                  bottom=False, left=False,
+                                                  labelbottom=False, labelleft=False) 
 
     def after_triangulation(self, locals):
         if self.simulation.trigger_visualization:
@@ -359,22 +390,28 @@ class SimulationCallback(FeatureBasedVisualOdometryCallback):
         img_l2, img_r2 = locals['img_pair_2']
         xyz_1 = locals['xyz_1']
         xyz_2 = locals['xyz_2']
+        # uv_l1, uv_r1 = self.simulation.odom.camera_model.forward(xyz_1)
+        # uv_l2, uv_r2 = self.simulation.odom.camera_model.forward(xyz_2)
+        uv_l1 = locals['uv_left_1']
+        uv_l2 = locals['uv_left_2']
         
-        uv_l1, uv_r1 = self.simulation.odom.camera_model.forward(xyz_1)
-        uv_l2, uv_r2 = self.simulation.odom.camera_model.forward(xyz_2)
+        # # depth map
+        # depth_map = np.zeros(shape=img_l1.shape[:2])
+        # for (x,y,z), (u,v) in zip(xyz_1, uv_l1):
+        #     depth_map[v,u] = z
+        # plt.imshow(depth_map)
+        # plt.show()
         
+        # optical flow
         blended_l = cv2.addWeighted(img_l1, 0.5, img_l2, 0.5, 0.0)
-        #blended_r = cv2.addWeighted(img_r1, 0.5, img_r2, 0.5, 0.0)
         
         for pt1, pt2 in zip(uv_l1, uv_l2):
             cv2.line(blended_l, pt1, pt2, color=(0,0,255), thickness=1)
-        # for pt1, pt2 in zip(uv_r1, uv_r2):
-        #     cv2.line(blended_r, pt1, pt2, color=(0,0,255), thickness=1)
-        # stacked = np.concatenate([blended_l, blended_r], axis=1)
 
         ax = self.simulation.axes['B']
         ax.clear(), ax.set_title('Optical Flow (Left Image only)')
         ax.imshow(blended_l)
+        ax.tick_params(which='both', bottom=False, left=False, labelbottom=False, labelleft=False) 
         
 
 class Simulation():
@@ -392,8 +429,12 @@ class Simulation():
         self.odom.callback = SimulationCallback(simulation=self)
 
         # state, to be updated
-        self._T_world_to_cam = T_world_to_cam_initial
-        self.t = 1 # note: 1 instead of 0, because we need 2 image pairs for tracking
+        self.t = 90
+        assert self.t>0 # note: >0, because we need 2 image pairs for tracking
+        Rt_gt_current = self.df_ground_truth.iloc[self.t].to_numpy().reshape(3,4)
+        self._T_world_to_cam = np.eye(4)
+        self._T_world_to_cam[:3, :] = Rt_gt_current
+        
     
         # visualization
         self.freq = 1
@@ -443,16 +484,17 @@ class Simulation():
         # visual odometry
         prior_img_pair = self.img_stream[self.t-1]
         current_img_pair = self.img_stream[self.t]
-        T_prior_to_current = odometry(prior_img_pair, current_img_pair)
+        T_prior_to_current = self.odom(prior_img_pair, current_img_pair)
         # todo: tmp
         Rt_gt_current = self.df_ground_truth.iloc[self.t].to_numpy().reshape(3,4)
         Rt_gt_prior = self.df_ground_truth.iloc[self.t-1].to_numpy().reshape(3,4)
         target = homogenious_matrix(R=Rt_gt_current[:,:3], t=Rt_gt_current[:,3]) \
                  @ np.linalg.inv(homogenious_matrix(R=Rt_gt_prior[:,:3], t=Rt_gt_prior[:,3]))
+        print(np.round(T_prior_to_current, decimals=2))
         print(np.round(target, decimals=2))
         # todo: tmp end
         #print('\n', np.round(T_prior_to_current, decimals=2))
-        self.T_world_to_cam = T_prior_to_current @ self.T_world_to_cam
+        self.T_world_to_cam = self.T_world_to_cam @ T_prior_to_current
         
         if self.trigger_visualization:
             self.visualize(current_img_pair)
