@@ -36,9 +36,6 @@ def filter_matches_by_distance_ratio(knn_matches):
 
 def filter_best_matches(matches, keep_n_best):
     '''Keep the n best matches (smallest distance) and reject all other matches.'''
-    # fig, ax = plt.subplots()
-    # ax.hist([m.distance for m in matches], bins=100)
-    # plt.show()
     n_matches = min(keep_n_best, len(matches))
     sorted_matches = sorted(matches, key=lambda x: x.distance)
     good_matches = sorted_matches[:n_matches]

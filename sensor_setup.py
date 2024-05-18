@@ -2,10 +2,13 @@
 information about the sensor setup can be found in
 [Geiger, 2013: Vision Meets Robotics - The Kitti Dataset]
 '''
+import os
 
 import numpy as np
 import pandas as pd
+
 from utils.spatial import homogenious_matrix
+from config import local_data_dir
 
 class sensor_setup:
     # world coordinate system
@@ -14,7 +17,7 @@ class sensor_setup:
            [0, -1, 0],
            [1,  0, 0]]
     )
-    # note: initially, camera is positioned at (0,0,0) in world coordinates,
+    # note: initially, camera is positioned at xyz=(0,0,0) in world coordinates,
     #       but the cam-frame is rotated
 
     # extrinsics (aka rigid body transformations)
@@ -36,7 +39,7 @@ class sensor_setup:
     # intrinsics (rectification and projection in image-plane)
     T_cam_to_camRect = homogenious_matrix() # todo: is this even required?
 
-    df = pd.read_csv('D:\\DATASETS\\Kitti_SLAM\\dataset\\sequences\\00\\calib.txt',
+    df = pd.read_csv(os.path.join(local_data_dir, 'sequences', '00', 'calib.txt'),
                     sep=' ', header=None, index_col=0)
 
     T_cam0_to_img0 = df.loc['P0:'].to_numpy().reshape(3,4)
