@@ -26,4 +26,6 @@ A Feature-Based approach for stereo VO was used and implemented with OpenCV (Pyt
 
 
 ### Results
+Experiments were carried out with a 2Hz frame-input rate.
+![results_2Hz](https://github.com/TomGoesGitHub/Visual-Odometry/assets/81027049/1e2269bb-4951-4f43-86ae-06eab5bc132a)
 
