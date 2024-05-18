@@ -10,7 +10,7 @@ import tqdm
 from utils.spatial import homogenious_matrix, normalize_rotation_matrix
 from utils.visualization import draw_coordinate_frame_2d, draw_matches_custom
 from visual_odometry import FeatureBasedVisualOdometryCallback
-from io_kittislam import KittiSlamDataloader
+from kitti_slam_specific.io import KittiSlamDataloader
 
 
 class SimulationCallback(FeatureBasedVisualOdometryCallback):

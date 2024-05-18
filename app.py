@@ -3,10 +3,10 @@ import os
 import cv2
 
 from visual_odometry import StereoCamera, FeatureBasedVisualOdemetry
-from simulation import Simulation
+from kitti_slam_specific.simulation import Simulation
 from config import local_data_dir
 # todo/note: in order to run the program you need to change the local data directory in the config-file
-from sensor_setup import sensor_setup
+from kitti_slam_specific.sensor_setup import sensor_setup
 
 def main():
     # camera model (intrinsics)

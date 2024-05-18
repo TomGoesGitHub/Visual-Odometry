@@ -1,0 +1,1 @@
+local_data_dir = 'D:\\DATASETS\\Kitti_SLAM\\dataset'
