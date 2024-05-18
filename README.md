@@ -4,6 +4,7 @@
 Leveraging computer vision techniques, a system that processes sequential stereo camera images to estimate the motion of a moving vehicle, was designed. Through feature extraction, matching, and robust estimation algorithms, the system successfully tracked key points in consecutive frames, allowing for the precise calculation of the vehicle's pose and movement. The solution demonstrates the importance of vision for autonomous systems.
 
 ### Demo
+(Buffering the GIF may take a few seconds)
 ![demo](https://github.com/TomGoesGitHub/Visual-Odometry/assets/81027049/8f9d312a-c75b-4a3c-a9fe-222c77248476)
 
 ### Dataset
@@ -26,4 +27,6 @@ A Feature-Based approach for stereo VO was used and implemented with OpenCV (Pyt
 
 
 ### Results
+Experiments were carried out with a 2Hz frame-input rate.
+![results_2Hz](https://github.com/TomGoesGitHub/Visual-Odometry/assets/81027049/1e2269bb-4951-4f43-86ae-06eab5bc132a)
 
